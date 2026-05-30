@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: dexter-postgres
+    environment:
+      POSTGRES_USER: dexter
+      POSTGRES_PASSWORD: dexter
+      POSTGRES_DB: dexter
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./seed/postgres.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
+      - dexter-pg-data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: dexter-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - dexter-minio-data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: dexter-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin; do
+        echo 'waiting for minio'; sleep 1;
+      done;
+      /usr/bin/mc mb -p local/dexter-test || true;
+      /usr/bin/mc anonymous set download local/dexter-test || true;
+      echo 'minio ready';
+      "
+
+  mongo:
+    image: mongo:7
+    container_name: dexter-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./seed/mongo.js:/docker-entrypoint-initdb.d/01-seed.js:ro
+      - dexter-mongo-data:/data/db
+
+  mysql:
+    image: mysql:8.4
+    container_name: dexter-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: dexter
+      MYSQL_DATABASE: dexter
+      MYSQL_USER: dexter
+      MYSQL_PASSWORD: dexter
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./seed/mysql.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
+      - dexter-mysql-data:/var/lib/mysql
+    command:
+      - --default-authentication-plugin=caching_sha2_password
+      - --mysql-native-password=ON
+
+volumes:
+  dexter-pg-data:
+  dexter-mysql-data:
+  dexter-mongo-data:
+  dexter-minio-data:
