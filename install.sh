@@ -29,11 +29,10 @@ case "$OS" in
   Linux)
     PLATFORM="linux"
     case "$ARCH" in
-      x86_64|amd64)  ASSET_SUFFIX="linux-x64.tar.gz" ;;
-      aarch64|arm64) ASSET_SUFFIX="linux-arm64.tar.gz" ;;
+      x86_64|amd64) ASSET_SUFFIX="linux-x64.tar.gz" ;;
       *)
         echo "Unsupported Linux architecture: $ARCH" >&2
-        echo "Only x86_64 and arm64 Linux builds are published." >&2
+        echo "Only x86_64 Linux builds are published." >&2
         exit 1
         ;;
     esac

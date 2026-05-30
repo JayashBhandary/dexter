@@ -130,16 +130,8 @@ jobs:
 
   # ----------------------------------------------------------------- Linux
   linux:
-    name: Linux (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+    name: Linux (x64)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux build deps
@@ -163,17 +155,17 @@ jobs:
       - run: flutter build linux --release
       - name: Stage desktop entry and icon
         run: |
-          BUNDLE="build/linux/${{ matrix.arch }}/release/bundle"
+          BUNDLE="build/linux/x64/release/bundle"
           cp linux/packaging/dexter.desktop "$BUNDLE/dexter.desktop"
           cp assets/icon/icon.png "$BUNDLE/dexter.png"
       - name: Package tarball
         run: |
-          tar -czf "dexter-${{ steps.ver.outputs.version }}-linux-${{ matrix.arch }}.tar.gz" \
-            -C "build/linux/${{ matrix.arch }}/release/bundle" .
+          tar -czf "dexter-${{ steps.ver.outputs.version }}-linux-x64.tar.gz" \
+            -C "build/linux/x64/release/bundle" .
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ matrix.arch }}
-          path: dexter-*-linux-${{ matrix.arch }}.tar.gz
+          name: linux-x64
+          path: dexter-*-linux-x64.tar.gz
           if-no-files-found: error
 
   # --------------------------------------------------------------- Windows
