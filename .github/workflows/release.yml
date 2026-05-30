@@ -1,25 +1,7 @@
-name: Build & Release
+name: Release
 
-# Tag push -> build all platforms -> attach artifacts to a GitHub Release.
-# Tag example: v0.1.0
-#
-# Manual run: workflow_dispatch with a `tag` input (used as the release name).
-#
-# NOTE: this project declares codegen dev-deps (freezed / riverpod_generator /
-# json_serializable) but contains no `part '*.g.dart'` / `@freezed` / `@riverpod`
-# usage yet, so there is intentionally NO `build_runner` step. The current
-# riverpod 2.x codegen toolchain is also unsatisfiable against the analyzer that
-# ships with Flutter 3.44 — add the step back only once codegen is actually used
-# and the toolchain is pinned to a consistent set.
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to release (e.g. v0.1.0). Used as the release name when triggered manually.'
-        required: true
 
 permissions:
   contents: write
@@ -29,201 +11,38 @@ env:
   FLUTTER_CHANNEL: 'stable'
 
 jobs:
-  # ---------------------------------------------------------------- Android
-  android:
-    name: Android (per-ABI APK + AAB)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: ${{ env.FLUTTER_CHANNEL }}
-          cache: true
-      - name: Resolve version
-        id: ver
-        run: |
-          INPUT="${{ github.event.inputs.tag }}"
-          REF="${INPUT:-$GITHUB_REF_NAME}"
-          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
-      - run: flutter pub get
-      # --split-per-abi -> one APK each: armeabi-v7a (arm), arm64-v8a (arm64), x86_64.
-      - run: flutter build apk --release --split-per-abi
-      # Universal AAB (Play Store splits per device).
-      - run: flutter build appbundle --release
-      - name: Rename artifacts with version
-        run: |
-          V="${{ steps.ver.outputs.version }}"
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "dexter-${V}-android-armeabi-v7a.apk"
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk   "dexter-${V}-android-arm64-v8a.apk"
-          cp build/app/outputs/flutter-apk/app-x86_64-release.apk      "dexter-${V}-android-x86_64.apk"
-          cp build/app/outputs/bundle/release/app-release.aab          "dexter-${V}-android.aab"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: android
-          path: dexter-*-android*.*
-          if-no-files-found: error
-
-  # -------------------------------------------------------------------- iOS
-  ios:
-    name: iOS (unsigned)
+  build-macos:
+    name: Build macOS (arm64 + x64 + universal)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: ${{ env.FLUTTER_CHANNEL }}
-          cache: true
-      - name: Resolve version
-        id: ver
-        run: |
-          INPUT="${{ github.event.inputs.tag }}"
-          REF="${INPUT:-$GITHUB_REF_NAME}"
-          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
-      - run: flutter pub get
-      # No signing certs in CI -> build without codesign, package the .app into an unsigned .ipa.
-      - run: flutter build ios --release --no-codesign
-      - name: Package unsigned IPA
-        run: |
-          set -euo pipefail
-          cd build/ios/iphoneos
-          mkdir -p Payload
-          cp -r Runner.app Payload/Runner.app
-          zip -r -q "dexter-${{ steps.ver.outputs.version }}-ios-unsigned.ipa" Payload
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ios
-          path: build/ios/iphoneos/dexter-*-ios-unsigned.ipa
-          if-no-files-found: error
 
-  # ------------------------------------------------------------------- Web
-  web:
-    name: Web
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: ${{ env.FLUTTER_CHANNEL }}
-          cache: true
-      - name: Resolve version
-        id: ver
-        run: |
-          INPUT="${{ github.event.inputs.tag }}"
-          REF="${INPUT:-$GITHUB_REF_NAME}"
-          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
-      - run: flutter pub get
-      - run: flutter build web --release
-      - name: Archive web build
-        run: cd build/web && zip -r -q "$GITHUB_WORKSPACE/dexter-${{ steps.ver.outputs.version }}-web.zip" .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: web
-          path: dexter-*-web.zip
-          if-no-files-found: error
 
-  # ----------------------------------------------------------------- Linux
-  linux:
-    name: Linux (x64)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Linux build deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang cmake ninja-build pkg-config \
-            libgtk-3-dev liblzma-dev libstdc++-12-dev
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: ${{ env.FLUTTER_CHANNEL }}
-          cache: true
       - name: Resolve version
         id: ver
         run: |
-          INPUT="${{ github.event.inputs.tag }}"
-          REF="${INPUT:-$GITHUB_REF_NAME}"
-          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
-      - run: flutter pub get
-      - run: flutter build linux --release
-      - name: Stage desktop entry and icon
-        run: |
-          BUNDLE="build/linux/x64/release/bundle"
-          cp linux/packaging/dexter.desktop "$BUNDLE/dexter.desktop"
-          cp assets/icon/icon.png "$BUNDLE/dexter.png"
-      - name: Package tarball
-        run: |
-          tar -czf "dexter-${{ steps.ver.outputs.version }}-linux-x64.tar.gz" \
-            -C "build/linux/x64/release/bundle" .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-x64
-          path: dexter-*-linux-x64.tar.gz
-          if-no-files-found: error
+          # Single source of truth: the `version:` line in pubspec.yaml.
+          # Strip the +build suffix -> 0.1.0+1 becomes 0.1.0.
+          VERSION=$(grep '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*([^+]+).*/\1/' | tr -d '[:space:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
 
-  # --------------------------------------------------------------- Windows
-  windows:
-    name: Windows (x64)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: ${{ env.FLUTTER_CHANNEL }}
-          cache: true
-      - name: Resolve version
-        id: ver
-        shell: bash
-        run: |
-          INPUT="${{ github.event.inputs.tag }}"
-          REF="${INPUT:-$GITHUB_REF_NAME}"
-          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
       - run: flutter pub get
-      - run: flutter build windows --release
-      - name: Package zip
-        shell: pwsh
-        run: |
-          $version = "${{ steps.ver.outputs.version }}"
-          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath "dexter-$version-windows-x64.zip"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows
-          path: dexter-*-windows-x64.zip
-          if-no-files-found: error
 
-  # ----------------------------------------------------------------- macOS
-  macos:
-    name: macOS (DMG)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: ${{ env.FLUTTER_CHANNEL }}
-          cache: true
-      - name: Resolve version
-        id: ver
-        run: |
-          INPUT="${{ github.event.inputs.tag }}"
-          REF="${INPUT:-$GITHUB_REF_NAME}"
-          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
-      - run: flutter pub get
-      - name: Build macOS app
+      - name: Build macOS app (universal)
         run: flutter build macos --release
-      - name: Report binary architectures
+
+      - name: Verify universal binary
         run: |
           BIN="build/macos/Build/Products/Release/dexter.app/Contents/MacOS/dexter"
-          file "$BIN" || true
-          lipo -info "$BIN" || true
+          file "$BIN"
+          lipo -info "$BIN"
+          lipo -info "$BIN" | grep -E 'arm64' && lipo -info "$BIN" | grep -E 'x86_64'
+
       - name: Package DMGs (universal, arm64, x64)
         run: |
           set -euo pipefail
@@ -233,30 +52,32 @@ jobs:
           thin_app() {
             local app="$1"
             local arch="$2"
-            # Only thin if the binary is actually universal; native-arch builds
-            # have nothing to thin, so the lipo would fail — skip them.
             find "$app" -type f -print0 | while IFS= read -r -d '' f; do
               if file -b "$f" | grep -q "Mach-O.*universal"; then
                 lipo "$f" -thin "$arch" -output "$f.tmp" && mv "$f.tmp" "$f"
               fi
             done
+            # Re-sign ad-hoc since lipo invalidated signatures
             codesign --force --deep --sign - "$app"
           }
 
           package_dmg() {
             local flavor="$1"
-            local arch="$2"   # empty = no thinning
+            local arch="$2"   # empty = universal, no thinning
             local stage="dist/$flavor"
             local app_copy="$stage/dexter.app"
             rm -rf "$stage"
             mkdir -p "$stage"
             cp -R "$SRC" "$app_copy"
             ln -s /Applications "$stage/Applications"
+
             if [ -n "$arch" ]; then
-              echo "==> Thinning $flavor to $arch (no-op if not universal)"
+              echo "==> Thinning $flavor to $arch"
               thin_app "$app_copy" "$arch"
-              lipo -info "$app_copy/Contents/MacOS/dexter" || true
+              echo "==> Verifying thinned main binary"
+              lipo -info "$app_copy/Contents/MacOS/dexter"
             fi
+
             hdiutil create \
               -volname "dexter" \
               -srcfolder "$stage" \
@@ -265,36 +86,122 @@ jobs:
           }
 
           package_dmg "universal" ""
-          # Per-arch DMGs are only meaningful for a universal source build; the
-          # thinning is a no-op otherwise and the DMG still installs fine.
-          package_dmg "arm64" "arm64"
-          package_dmg "x64"   "x86_64"
+          package_dmg "arm64"     "arm64"
+          package_dmg "x64"       "x86_64"
+
       - uses: actions/upload-artifact@v4
         with:
           name: macos
           path: dexter-*-macos-*.dmg
           if-no-files-found: error
 
-  # --------------------------------------------------------------- Release
-  release:
-    name: Publish GitHub Release
-    needs: [android, ios, web, linux, windows, macos]
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*([^+]+).*/\1/' | tr -d '[:space:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - run: flutter pub get
+
+      - name: Build Windows app
+        run: flutter build windows --release
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $version = "${{ steps.ver.outputs.version }}"
+          $dest = "dexter-$version-windows-x64.zip"
+          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath $dest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dexter-*-windows-x64.zip
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux (x64)
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
+
+      - name: Resolve version
+        id: ver
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*([^+]+).*/\1/' | tr -d '[:space:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - run: flutter pub get
+
+      - name: Build Linux app
+        run: flutter build linux --release
+
+      - name: Stage desktop entry and icon
+        run: |
+          BUNDLE="build/linux/x64/release/bundle"
+          cp linux/packaging/dexter.desktop "$BUNDLE/dexter.desktop"
+          cp assets/icon/icon.png "$BUNDLE/dexter.png"
+
+      - name: Package tarball
+        run: |
+          tar -czf "dexter-${{ steps.ver.outputs.version }}-linux-x64.tar.gz" \
+            -C build/linux/x64/release/bundle .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dexter-*-linux-x64.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
       - name: Resolve tag
         id: ver
         run: |
-          INPUT="${{ github.event.inputs.tag }}"
-          REF="${INPUT:-$GITHUB_REF_NAME}"
-          echo "tag=${REF}" >> "$GITHUB_OUTPUT"
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
+          VERSION=$(grep '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*([^+]+).*/\1/' | tr -d '[:space:]')
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: dexter ${{ steps.ver.outputs.tag }}
           generate_release_notes: true
-          files: artifacts/**/*
+          files: |
+            artifacts/macos/*.dmg
+            artifacts/windows/*.zip
+            artifacts/linux/*.tar.gz
