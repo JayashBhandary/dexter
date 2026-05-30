@@ -1,0 +1,38 @@
+import '../connectors/data_source.dart';
+import '../connectors/registry.dart';
+import '../domain/connection_record.dart';
+import 'secrets_store.dart';
+
+/// Caches live [DataSource] instances by connection id.
+class ConnectionManager {
+  ConnectionManager({required this.secretsStore});
+
+  final SecretsStore secretsStore;
+  final Map<String, DataSource> _live = {};
+
+  bool isOpen(String connectionId) => _live.containsKey(connectionId);
+
+  DataSource? peek(String connectionId) => _live[connectionId];
+
+  Future<DataSource> open(ConnectionRecord record) async {
+    final existing = _live[record.id];
+    if (existing != null) return existing;
+    final secrets = await secretsStore.read(record.secretsRef);
+    final source = ConnectorRegistry.instance.create(record, secrets);
+    await source.connect();
+    _live[record.id] = source;
+    return source;
+  }
+
+  Future<void> close(String connectionId) async {
+    final s = _live.remove(connectionId);
+    if (s != null) await s.dispose();
+  }
+
+  Future<void> closeAll() async {
+    for (final s in _live.values) {
+      await s.dispose();
+    }
+    _live.clear();
+  }
+}

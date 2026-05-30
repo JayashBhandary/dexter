@@ -1,0 +1,84 @@
+name: dexter
+description: "Cross-platform database & data-source management tool."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # State management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # Routing
+  go_router: ^14.6.0
+
+  # Models / codegen runtime
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+  # Logging / utilities
+  logger: ^2.4.0
+  uuid: ^4.5.1
+  collection: ^1.19.0
+  path: ^1.9.0
+  path_provider: ^2.1.4
+  file_picker: ^8.1.4
+
+  # Secure credential storage
+  flutter_secure_storage: ^9.2.2
+
+  # Desktop window
+  window_manager: ^0.4.2
+
+  # SQLite (FFI, desktop/mobile; web needs wasm worker)
+  sqlite3: ^2.4.5
+  sqlite3_flutter_libs: ^0.5.24
+
+  # Relational drivers
+  postgres: ^3.5.0
+  mysql_client: ^0.0.27
+
+  # NoSQL
+  mongo_dart: ^0.10.4
+
+  # Firestore via REST (multi-project; not cloud_firestore)
+  googleapis: ^13.2.0
+  googleapis_auth: ^1.6.0
+
+  # Object storage (S3 / MinIO / R2 / etc.)
+  minio: ^3.5.0
+
+  # HTTP / REST / GraphQL
+  dio: ^5.7.0
+  http: ^1.2.0
+  graphql: ^5.2.0-beta.7
+
+  # UI: grid + json + code editor + syntax highlight
+  pluto_grid: ^8.0.0
+  flutter_json_view: ^1.1.5
+  code_text_field: ^1.1.0
+  flutter_highlight: ^0.7.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.13
+  riverpod_generator: ^2.6.3
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+  custom_lint: ^0.7.0
+  riverpod_lint: ^2.6.3
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
