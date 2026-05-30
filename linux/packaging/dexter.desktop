@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Dexter
+Comment=Cross-platform database & data-source management tool
+Exec=@EXEC@
+Icon=dexter
+Terminal=false
+Categories=Development;Database;Utility;
+StartupWMClass=dexter

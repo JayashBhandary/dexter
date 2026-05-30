@@ -1,56 +1,95 @@
-# dexter installer for Windows (PowerShell).
-# Downloads the matching artifact from the latest GitHub Release and installs it.
+# dexter installer (Windows x64).
 #
 # Usage:
-#   irm https://raw.githubusercontent.com/OWNER/dexter/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/JayashBhandary/dexter/main/install.ps1 | iex
 #
-# Env overrides:
-#   DEXTER_REPO     owner/repo         (default: OWNER/dexter)
-#   DEXTER_VERSION  tag, e.g. v0.1.0   (default: latest release)
+# Downloads the latest GitHub release zip and installs to:
+#   %LOCALAPPDATA%\Programs\dexter
+# Also creates a Start Menu shortcut.
 
 $ErrorActionPreference = 'Stop'
 
-$Repo    = if ($env:DEXTER_REPO)    { $env:DEXTER_REPO }    else { 'OWNER/dexter' }
-$Version = if ($env:DEXTER_VERSION) { $env:DEXTER_VERSION } else { 'latest' }
-$App     = 'dexter'
-$Asset   = 'dexter-windows-x64.zip'   # Flutter Windows desktop is x64 only
+$Repo    = 'JayashBhandary/dexter'
+$AppName = 'dexter'
 
-function Info($m) { Write-Host "==> $m" -ForegroundColor Cyan }
-function Die($m)  { Write-Host "error: $m" -ForegroundColor Red; exit 1 }
+# GitHub API needs TLS 1.2 on older Windows / PowerShell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-if ([Environment]::Is64BitOperatingSystem -eq $false) { Die 'x64 OS required' }
+Write-Host "==> Fetching latest release info from $Repo"
 
-# --- resolve download URL --------------------------------------------------
-$api = if ($Version -eq 'latest') {
-  "https://api.github.com/repos/$Repo/releases/latest"
-} else {
-  "https://api.github.com/repos/$Repo/releases/tags/$Version"
+$headers = @{}
+if ($env:GITHUB_TOKEN) {
+    $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN"
+}
+$headers['User-Agent'] = 'dexter-installer'
+
+$release = Invoke-RestMethod `
+    -Uri "https://api.github.com/repos/$Repo/releases/latest" `
+    -Headers $headers `
+    -UseBasicParsing
+
+$asset = $release.assets | Where-Object { $_.name -like '*windows-x64.zip' } | Select-Object -First 1
+
+if (-not $asset) {
+    Write-Error "No windows-x64.zip asset found in the latest release. See https://github.com/$Repo/releases"
+    exit 1
 }
 
-Info "Querying $Repo ($Version)"
-$headers = @{ 'User-Agent' = 'dexter-installer' }
-$release = Invoke-RestMethod -Uri $api -Headers $headers
-$url = ($release.assets | Where-Object { $_.name -eq $Asset }).browser_download_url
-if (-not $url) { Die "asset '$Asset' not found in $Repo $Version" }
+$tmpFile = [System.IO.Path]::GetTempFileName()
+$zipPath = "$tmpFile.zip"
+Move-Item -Force $tmpFile $zipPath
 
-# --- download & install ----------------------------------------------------
-$dest = Join-Path $env:LOCALAPPDATA "Programs\$App"
-$tmp  = Join-Path $env:TEMP $Asset
+try {
+    Write-Host "==> Downloading $($asset.browser_download_url)"
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
 
-Info "Downloading $Asset"
-Invoke-WebRequest -Uri $url -OutFile $tmp -Headers $headers
+    $installDir = Join-Path $env:LOCALAPPDATA "Programs\$AppName"
 
-Info "Installing to $dest"
-if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-New-Item -ItemType Directory -Force -Path $dest | Out-Null
-Expand-Archive -Path $tmp -DestinationPath $dest -Force
-Remove-Item $tmp -Force
+    if (Test-Path $installDir) {
+        Write-Host "==> Removing previous installation at $installDir"
+        Remove-Item -Recurse -Force $installDir
+    }
 
-# --- add to user PATH ------------------------------------------------------
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($userPath -notlike "*$dest*") {
-  [Environment]::SetEnvironmentVariable('Path', "$userPath;$dest", 'User')
-  Info "Added $dest to user PATH (restart shell to apply)"
+    Write-Host "==> Extracting to $installDir"
+    New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+    Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+
+    # Locate the executable (Flutter builds <project-name>.exe, lowercased)
+    $exe = Get-ChildItem -Path $installDir -Filter '*.exe' -File |
+           Where-Object { $_.Name -match '^(?i)dexter\.exe$' } |
+           Select-Object -First 1
+
+    if (-not $exe) {
+        # Fallback: first .exe in the bundle
+        $exe = Get-ChildItem -Path $installDir -Filter '*.exe' -File | Select-Object -First 1
+    }
+
+    if (-not $exe) {
+        Write-Error "Could not find a .exe inside the extracted bundle at $installDir."
+        exit 1
+    }
+
+    # Start Menu shortcut
+    $startMenuDir = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs'
+    if (-not (Test-Path $startMenuDir)) {
+        New-Item -ItemType Directory -Force -Path $startMenuDir | Out-Null
+    }
+    $shortcutPath = Join-Path $startMenuDir "$AppName.lnk"
+
+    $shell    = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath       = $exe.FullName
+    $shortcut.WorkingDirectory = $exe.DirectoryName
+    $shortcut.Save()
+
+    Write-Host ''
+    Write-Host "Installed:  $installDir"
+    Write-Host "Executable: $($exe.FullName)"
+    Write-Host "Shortcut:   $shortcutPath"
+    Write-Host 'Done.'
 }
-
-Info "Done. Run: $App"
+finally {
+    if (Test-Path $zipPath) {
+        Remove-Item -Force $zipPath
+    }
+}
